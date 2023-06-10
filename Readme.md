@@ -13,4 +13,4 @@ It will output a classic boxplot with scatter for each datapoint and calculate s
 The program assumes the data is in a specific folder and different channels are present as their own unique files.
 All files should be named starting with an increasing number for each condition.
 
-**Folder, file extentions and sample names have to be enterted inside the code!**, below the `if __name__ == "__main__`
+**Folder, file extentions and sample names have to be enterted inside the code!**, below the `if __name__ == "__main__"`
