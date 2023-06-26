@@ -12,6 +12,7 @@ from skimage.filters.thresholding import threshold_otsu
 from skimage.segmentation import watershed
 import tifffile
 import seaborn as sns
+import multiprocessing as mp
 #import pickle
 
 ##########
@@ -21,19 +22,24 @@ functions
 """
 
 
-def spinning(n:int):
+def spinning():
 	"""
 	print spinning / while waiting..
+	needs to be a daemon Process
 	"""
-	
-	if n % 4 == 0:
-		print("\033[F-")
-	elif n % 3 == 0:
-		print("\033[F/")
-	elif n % 2 == 0:
-		print("\033[F|")
-	else:
-		print("\033[F\\")
+
+	n = 0
+	print("/")
+	while True:
+		if n % 4 == 0:
+			print("\033[F-")
+		elif n % 3 == 0:
+			print("\033[F/")
+		elif n % 2 == 0:
+			print("\033[F|")
+		else:
+			print("\033[F\\")
+		n += 1
 
 def create_splits(n: int):
 	"""
@@ -88,57 +94,39 @@ def bg_detection(images):
 	remove background of images via otsu_thresholding and filling morphological holes in the signal
 	also initially labels cells
 	"""
-	sigma = 1
-	img_smooth = [ ndi.gaussian_filter(img, sigma) for img in images ]
+	spin = mp.Process(target=spinning, daemon=True)
+	spin.start()
 
-	thresh = [ threshold_otsu(img) for img in img_smooth ]
-	signal_raw = [ img_smooth[i] > thresh[i] for i,_ in enumerate(img_smooth) ]
+	def process(image, q, index):
+		sigma = 1
+		img_smooth = ndi.gaussian_filter(image, sigma)
 
-	signal = [ ndi.binary_fill_holes(img) for img in signal_raw ]
+		thresh = threshold_otsu(img_smooth)
+		signal_raw = img_smooth > thresh
 
-	cell_labels = [ ndi.label(sig)[0] for sig in signal ]
-	n_cells = [ cells.max() for cells in cell_labels ]
+		signal = ndi.binary_fill_holes(signal_raw)
 
+		cell_labels = ndi.label(signal)[0]
+		n_cells = cell_labels.max()
+
+		q.put([img_smooth, signal, cell_labels, n_cells, index])
+
+	
+	q = mp.Queue()
+	processes = [ mp.Process(target=process, args=(img, q, i)) for i, img in enumerate(images) ]
+	for p in processes:
+		p.start()
+
+	img_smooth = [False] * len(processes)
+	signal = [False] * len(processes)
+	cell_labels = [False] *len(processes)
+	n_cells = [False] * len(processes)
+	for k in range(len(processes)):
+		result = q.get()
+		img_smooth[result[-1]], signal[result[-1]], cell_labels[result[-1]], n_cells[result[-1]] = result[:-1]
+
+	spin.terminate()
 	return img_smooth, signal, cell_labels, n_cells
-
-def cleanup_labels(images: list, labels: list, ignore=0):
-	"""
-	cleans up labels for following constraints:
-		no cells at image border
-		no cells with oversaturated pixels
-	"""
-
-	border_mask = [ ndi.binary_dilation(np.zeros(cells.shape, dtype=bool), border_value=1) for cells in labels ]
-
-	print(f"Cleaning up cell labels . . .")
-	k = 0
-	for i,channel in enumerate(labels[ignore:]):
-		i += ignore
-		for cell_ID in np.unique(channel):
-
-			print(f"\033[FCleaning up cell labels . . . {str(round((k/(n_cells[1]+n_cells[2]))*100, 1)).zfill(2)}%")
-			k += 1
-			
-			cell_mask = channel == cell_ID
-			cell_border_overlap = np.logical_and(cell_mask, border_mask[i])
-			n_overlap_pixels = np.sum(cell_border_overlap)
-
-			if n_overlap_pixels > 0:
-				labels[i][cell_mask] = 0	# delete cell at boundary
-				continue
-
-			#img_of_cell = np.logical_and(cell_mask, img_smooth[i])
-			img_of_cell = cell_mask * images[i]
-			maxI = ndi.maximum(img_of_cell)
-			if maxI == 255:		# removing oversaturated cells
-				labels[i][cell_mask] = 0
-				continue
-
-		for new_ID, cell_ID in enumerate(np.unique(labels[i])[ignore:]):
-			labels[i][labels[i]==cell_ID] = new_ID + 1	# re-label
-
-	print(f"\033[FCleaning up cell labels . . . 100.0%")
-	return labels
 
 def re_label(labels: list, ignore=0):
 	"""
@@ -153,10 +141,66 @@ def re_label(labels: list, ignore=0):
 
 	return labels, n_cells
 
+def cleanup_labels(images: list, labels: list, ignore=0):
+	"""
+	cleans up labels for following constraints:
+		no cells at image border
+		no cells with oversaturated pixels
+	"""
+
+
+	print(f"Cleaning up cell labels . . .")
+	k = mp.Value("i", 0)
+	n_cells = [ cells.max() for cells in labels ]
+	total = mp.Value("i", np.sum(n_cells[ignore:]))
+	def process(img, label, q, k, total, index, ignore=0):
+		border_mask = ndi.binary_dilation(np.zeros(label.shape, dtype=bool), border_value=1)
+		for cell_ID in np.unique(label):
+
+			print(f"\033[FCleaning up cell labels . . . {str(round((k.value/(total.value))*100, 1)).zfill(2)}%")
+			k.value += 1
+			
+			cell_mask = label == cell_ID
+			cell_border_overlap = np.logical_and(cell_mask, border_mask)
+			n_overlap_pixels = np.sum(cell_border_overlap)
+
+			if n_overlap_pixels > 0:
+				label[cell_mask] = 0	# delete cell at boundary
+				continue
+
+			#img_of_cell = np.logical_and(cell_mask, img_smooth[i])
+			img_of_cell = cell_mask * img
+			maxI = ndi.maximum(img_of_cell)
+			if maxI == 255:		# removing oversaturated cells
+				label[cell_mask] = 0
+				continue
+		q.put([label, index])
+
+	q = mp.Queue()
+	processes = [ mp.Process(target=process, args=(images[i], labels[i], q, k, total, i, ignore)) for i,_ in enumerate(images) if i >= ignore ]
+	for p in processes:
+		p.start()
+
+	cell_labels = [False] * (len(processes)+ignore)
+	if ignore > 0:
+		cell_labels[ignore-1] = labels[0]
+	for _ in range(len(processes)):
+		result = q.get()
+		cell_labels[result[-1]] = result[0]
+
+
+	
+	print(f"\033[FCleaning up cell labels . . . 100.0%")
+	labels, _ = re_label(cell_labels, ignore)
+	return labels
+
 def check_nucleus_in_cytoplasm(labels: list, ignore=0):
 	"""
 	check if the nucleus signal has a corresponding cytoplasmic signal
 	"""
+	spin = mp.Process(target=spinning, daemon=True)
+	spin.start()
+
 	center_of_mass = {}
 	for nuc_ID in np.unique(labels[2])[1:]:
 		nucleus_mask = labels[2] == nuc_ID
@@ -167,6 +211,8 @@ def check_nucleus_in_cytoplasm(labels: list, ignore=0):
 			labels[2][nucleus_mask] = 0	# removing cells where a the nucleus has no corresponding cytoplasm
 
 	labels,_ = re_label(labels, ignore=ignore)
+
+	spin.terminate()
 	return labels
 
 def ws_cytoplasm(img: list, signal: list, labels: list, index_cytoplasm: int, index_nuclei: int):
@@ -186,6 +232,9 @@ def check_area_of_cells(labels: list, ignore=0, index_cytoplasm=1, index_nucleus
 	"""
 	excludes all cells where the area of the nucleus is bigger than the cytoplasm
 	"""
+	spin = mp.Process(target=spinning, daemon=True)
+	spin.start()
+
 	area = {}
 	for i,channel in enumerate(labels[ignore:]):
 		area[i] = []
@@ -202,6 +251,7 @@ def check_area_of_cells(labels: list, ignore=0, index_cytoplasm=1, index_nucleus
 			labels[index_nucleus][nuc_mask] = 0
 			continue
 
+	spin.terminate()
 	return re_label(labels, ignore=ignore)
 
 
