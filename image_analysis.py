@@ -364,7 +364,7 @@ if __name__ == "__main__":
 	starting_n = n
 	ignore_channel = 1	# ignore channel 1 (index 0) for analysing
 	stats_for_plot = {}
-	while (files := [ file for file in files_names if file[:len(str(n))] == str(n) ] != []):
+	while (files := [ file for file in files_names if file[:len(str(n))] == str(n) ]) != []:
 
 		images = [ imread(os.path.join(files_dir, file)) for file in files ]
 
