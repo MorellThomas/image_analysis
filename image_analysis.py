@@ -58,7 +58,7 @@ def create_splits(n: int):
 		return first, int((n + 1) / first)
 
 	last = int(n / first)
-	if first / last > last**2
+	if first / last > last**2:
 		first = int(first / last)
 
 	return first, int(n / first)
