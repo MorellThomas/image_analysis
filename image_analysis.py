@@ -74,20 +74,39 @@ def setup_files(filedir: str, suffix: str):
 
 	return filedir,files
 
-def plot_channels(images: list, titles: list, maxs: list, cmaps=["gray", "Greens", "Reds"]):
+def plot_channels(images: list, titles: list, maxs: list, cmaps=["gray", "Greens", "Reds"], interactive=False):
 	"""
 	plot n images side-by-side with i different channels
 	"""
 
+	if interactive:
+		plt.ion()
 	n = len(images)
 	cols, rows = create_splits(n)
-	plt.figure()
+	fig = plt.figure()
 	for i,_ in enumerate(images):
 		plt.subplot(rows, cols, i+1)
 		plt.imshow(images[i], interpolation="none", cmap=cmaps[i], vmin=0, vmax=maxs[i])
 		plt.title(titles[i])
 		plt.colorbar(fraction=0.046, pad=0.04)
 	plt.show()
+	if interactive:
+		return fig
+
+def process(image, index):
+	sigma = 1
+	img_smooth = ndi.gaussian_filter(image, sigma)
+
+	thresh = threshold_otsu(img_smooth)
+	signal_raw = img_smooth > thresh
+
+	signal = ndi.binary_fill_holes(signal_raw)
+
+	cell_labels = ndi.label(signal)[0]
+	n_cells = cell_labels.max()
+
+	#q.put([img_smooth, signal, cell_labels, n_cells, index])
+	return img_smooth, signal, cell_labels, n_cells, index
 
 def bg_detection(images):
 	"""
@@ -97,33 +116,20 @@ def bg_detection(images):
 	spin = mp.Process(target=spinning, daemon=True)
 	spin.start()
 
-	def process(image, q, index):
-		sigma = 1
-		img_smooth = ndi.gaussian_filter(image, sigma)
-
-		thresh = threshold_otsu(img_smooth)
-		signal_raw = img_smooth > thresh
-
-		signal = ndi.binary_fill_holes(signal_raw)
-
-		cell_labels = ndi.label(signal)[0]
-		n_cells = cell_labels.max()
-
-		q.put([img_smooth, signal, cell_labels, n_cells, index])
-
 	
-	q = mp.Queue()
-	processes = [ mp.Process(target=process, args=(img, q, i)) for i, img in enumerate(images) ]
-	for p in processes:
-		p.start()
+	pool = mp.Pool()
+	processes = [ pool.apply_async(process, args=(img, i)) for i, img in enumerate(images) ]
 
+	pool.close()
+	pool.join()
 	img_smooth = [False] * len(processes)
 	signal = [False] * len(processes)
 	cell_labels = [False] *len(processes)
 	n_cells = [False] * len(processes)
-	for k in range(len(processes)):
-		result = q.get()
+	for p in processes:
+		result = p.get()
 		img_smooth[result[-1]], signal[result[-1]], cell_labels[result[-1]], n_cells[result[-1]] = result[:-1]
+		
 
 	spin.terminate()
 	return img_smooth, signal, cell_labels, n_cells
@@ -364,9 +370,9 @@ if __name__ == "__main__":
 	starting_n = n
 	ignore_channel = 1	# ignore channel 1 (index 0) for analysing
 	stats_for_plot = {}
-	while (files := [ file for file in files_names if file[:len(str(n))] == str(n) ]) != []:
+	while [ file for file in files_names if file[:len(str(n))] == str(n) ] != []:
 
-		images = [ imread(os.path.join(files_dir, file)) for file in files ]
+		images = [ imread(os.path.join(files_dir, file)) for file in files_names if file[:len(str(n))] == str(n) ]
 
 		print(f"Analyzing sample {conditions[n-1]}")
 		
