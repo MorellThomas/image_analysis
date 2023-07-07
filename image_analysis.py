@@ -88,6 +88,8 @@ def plot_channels(images: list, titles: list, maxs: list, cmaps=["gray", "Greens
 
 	if interactive:
 		plt.ion()
+	else:
+		plt.ioff()
 	n = len(images)
 	cols, rows = create_splits(n)
 	fig = plt.figure()
