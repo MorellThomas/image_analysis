@@ -49,10 +49,17 @@ def create_splits(n: int):
 	if n <= 4:
 		return n, 1
 
-	n = n if n % 2 == 0 else n + 1
 	first = n // 2
 	while n % first != 0:
 		first -= 1
+
+	if first == 1:
+		first, _ = create_splits(n + 1)
+		return first, int((n + 1) / first)
+
+	last = int(n / first)
+	if first / last > last**2
+		first = int(first / last)
 
 	return first, int(n / first)
 	
