@@ -46,22 +46,8 @@ def create_splits(n: int):
 	return split tuple for a number of images, e.g.: 6 -> (3,2)
 	if n is uneven: do for n + 1
 	"""
-	if n <= 4:
-		return n, 1
 
-	first = n // 2
-	while n % first != 0:
-		first -= 1
-
-	if first == 1:
-		first, _ = create_splits(n + 1)
-		return first, int(np.ceil((n + 1) / first))
-
-	last = int(n / first)
-	if first / last > last**2:
-		first = int(first / last)
-
-	return first, int(n / first)
+	return np.ceil(np.sqrt(n)), np.round(np.sqrt(n))
 	
 
 def setup_files(filedir: str, suffix: str):
