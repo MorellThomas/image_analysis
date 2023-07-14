@@ -44,10 +44,9 @@ def spinning():
 def create_splits(n: int):
 	"""
 	return split tuple for a number of images, e.g.: 6 -> (3,2)
-	if n is uneven: do for n + 1
 	"""
 
-	return np.ceil(np.sqrt(n)), np.round(np.sqrt(n))
+	return int(np.ceil(np.sqrt(n))), int(np.round(np.sqrt(n)))
 	
 
 def setup_files(filedir: str, suffix: str):
@@ -112,7 +111,7 @@ def bg_detection(images):
 	spin.start()
 
 	
-	pool = mp.Pool()
+	pool = mp.Pool(mp.cpu_count()-1)
 	processes = [ pool.apply_async(process, args=(img, i)) for i, img in enumerate(images) ]
 
 	pool.close()
